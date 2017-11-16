@@ -17,7 +17,7 @@ import scipy.signal.signaltools
 from string import *
 from Tkinter import *
 from tkFileDialog import *
-import Image, ImageTk, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageOps
 import os, struct
 #import time
 
