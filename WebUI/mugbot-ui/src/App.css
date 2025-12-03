@@ -1,0 +1,32 @@
+.app-container {
+  min-height: 100vh;
+  background: #f8f9fa;
+}
+
+header {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card {
+  border: 1px solid #dee2e6;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.card-header {
+  background: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+  font-weight: 600;
+}
+
+.form-range {
+  cursor: pointer;
+}
+
+.font-monospace {
+  font-family: 'Courier New', Courier, monospace;
+}
+
+canvas {
+  display: block;
+  outline: none;
+}
