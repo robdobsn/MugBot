@@ -246,39 +246,68 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
     }
   }, [pathGroup])
 
-  // Create handle at X=-20mm position
+  // Create handle on the side of the mug at X=-20mm (rotation position)
   const handleGroup = useMemo(() => {
     const group = new THREE.Group()
-    const handleWidth = 18 // 18mm wide (depth from mug)
-    const handleHeight = 60 // 60mm high
-    const handleDepth = 4 // thickness of the handle material
-    const xPosition = -20 // -20mm from center
+    const handleWidth = 15 // 15mm wide (how far it extends from mug radially) - CONSTANT
+    const handleMargin = 10 // 10mm margin from top and bottom of mug
+    const handleHeight = mugHeight - (2 * handleMargin) // Height spans from 10mm from bottom to 10mm from top
+    const handleThickness = 3 // 3mm tube thickness
+    const handleXPosition = -20 // -20mm in the X coordinate system (rotation around mug)
     
-    // Calculate angle for X position on cylinder
-    const angle = (xPosition / parameters.xRange) * (2 * Math.PI)
+    // Calculate the angle for X=-20mm around the circumference
+    const angle = (handleXPosition / parameters.xRange) * 2 * Math.PI
     
-    // Position the handle attached to the outer surface of the mug
-    const handleOuterRadius = mugRadius + handleWidth / 2
-    const handleX = handleOuterRadius * Math.cos(angle)
-    const handleZ = handleOuterRadius * Math.sin(angle)
+    // Create handle as a vertical torus (semicircle)
+    // The torus by default is in the XY plane - we need it in a radial-vertical plane
+    const torusGeometry = new THREE.TorusGeometry(
+      handleWidth / 2,  // major radius - CONSTANT, determines how far it sticks out
+      handleThickness / 2,  // minor radius (tube thickness)
+      16,  // tubular segments
+      32,  // radial segments
+      Math.PI  // arc length (semicircle)
+    )
     
-    // Create handle using a torus (vertical orientation)
-    const torusGeometry = new THREE.TorusGeometry(handleHeight / 2, handleDepth / 2, 8, 16, Math.PI)
     const handleMaterial = new THREE.MeshStandardMaterial({ 
-      color: "#e0e0e0",
-      transparent: true,
-      opacity: 0.5
+      color: "#cccccc",
+      transparent: false,
+      opacity: 1
     })
+    
     const torus = new THREE.Mesh(torusGeometry, handleMaterial)
     
-    // Position and rotate the handle (vertical orientation, facing outward)
-    torus.position.set(handleX, 0, handleZ)
-    torus.rotation.y = angle - Math.PI / 2 // rotate to face outward from mug
-    torus.scale.x = handleWidth / handleHeight // make it narrower horizontally
+    // The torus starts in XY plane (horizontal circle)
+    // After rotation around Z by 90°, X becomes -Y and Y becomes X
+    // So to stretch it vertically (final Z direction), we need to scale X initially
     
-    group.add(torus)
+    // Step 1: Scale first - scale in X which will become the vertical after rotation
+    torus.scale.set(handleHeight / handleWidth, 1, 1)
+    
+    // Step 2: Rotate 90° around Z to orient the semicircle vertically
+    torus.rotation.z = Math.PI / 2
+    
+    // Step 3: Flip it 180° around Y so it curves outward instead of inward
+    torus.rotation.y = Math.PI
+    
+    // Step 4: Move the torus forward (in local X) so it's at the mug surface
+    // Also shift it vertically so the top is 10mm from top of mug and bottom is 10mm from bottom
+    // The handle center should be at Y=0, so we don't need vertical offset since mug is centered at Y=0
+    torus.position.set(mugRadius, 0, 0)
+    
+    // Step 5: Create a group and rotate it around Y axis (vertical) to the correct angular position
+    // The handle will be in a vertical plane passing through the mug center
+    const handleWithRotation = new THREE.Group()
+    handleWithRotation.add(torus)
+    handleWithRotation.rotation.y = angle
+    
+    // The mug is centered at Y=0, so top is at +mugHeight/2 and bottom is at -mugHeight/2
+    // We want the handle to span from (bottom + 10mm) to (top - 10mm)
+    // The handle center should be at Y=0 (mug center) which is already correct
+    // No vertical adjustment needed since handle and mug are both centered at Y=0
+    
+    group.add(handleWithRotation)
     return group
-  }, [parameters.xRange, mugRadius, mugHeight])
+  }, [mugRadius, parameters.xRange, mugHeight])
 
   return (
     <>
