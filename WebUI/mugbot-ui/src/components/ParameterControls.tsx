@@ -73,6 +73,44 @@ function ParameterControls({ parameters, onChange }: ParameterControlsProps) {
       </div>
 
       <div className="mb-3">
+        <label className="form-label">
+          X Offset: {parameters.xOffset}mm
+        </label>
+        <input
+          type="range"
+          className="form-range"
+          min="0"
+          max={parameters.xRange}
+          step="1"
+          value={parameters.xOffset}
+          onChange={(e) => handleChange('xOffset', parseFloat(e.target.value))}
+        />
+        <div className="d-flex justify-content-between">
+          <small className="text-muted">0mm</small>
+          <small className="text-muted">{parameters.xRange}mm</small>
+        </div>
+      </div>
+
+      <div className="mb-3">
+        <label className="form-label">
+          Y Offset: {parameters.yOffset}mm
+        </label>
+        <input
+          type="range"
+          className="form-range"
+          min="0"
+          max={parameters.yRange}
+          step="1"
+          value={parameters.yOffset}
+          onChange={(e) => handleChange('yOffset', parseFloat(e.target.value))}
+        />
+        <div className="d-flex justify-content-between">
+          <small className="text-muted">0mm</small>
+          <small className="text-muted">{parameters.yRange}mm</small>
+        </div>
+      </div>
+
+      <div className="mb-3">
         <label htmlFor="duetIp" className="form-label">
           Duet 2 IP Address
         </label>

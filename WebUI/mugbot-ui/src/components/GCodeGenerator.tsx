@@ -38,6 +38,7 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
       lines.push('G90 ; Absolute positioning')
       lines.push('M83 ; Relative extrusion mode')
       lines.push('G92 E0 ; Reset extruder position')
+      lines.push('M221 S' + Math.round(parameters.extrusionRate * 100) + ' ; Set extrusion multiplier to ' + Math.round(parameters.extrusionRate * 100) + '%')
       lines.push('')
       lines.push('; Move to start position')
       lines.push('G0 Z0 F3000 ; Set Z to 0')
@@ -187,6 +188,30 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
           }
           break
 
+        case 'Q': // Quadratic Bezier curve
+          for (let i = 0; i < coords.length; i += 4) {
+            if (coords[i] !== undefined && coords[i + 1] !== undefined && 
+                coords[i + 2] !== undefined && coords[i + 3] !== undefined) {
+              const cpX = type === 'Q' ? coords[i] : currentX + coords[i]
+              const cpY = type === 'Q' ? coords[i + 1] : currentY + coords[i + 1]
+              const newX = type === 'Q' ? coords[i + 2] : currentX + coords[i + 2]
+              const newY = type === 'Q' ? coords[i + 3] : currentY + coords[i + 3]
+              
+              // Approximate quadratic bezier with line segments
+              const steps = 5
+              for (let step = 1; step <= steps; step++) {
+                const t = step / steps
+                const x = (1 - t) * (1 - t) * currentX + 2 * (1 - t) * t * cpX + t * t * newX
+                const y = (1 - t) * (1 - t) * currentY + 2 * (1 - t) * t * cpY + t * t * newY
+                points.push(convertToMugCoords(x, y, minX, minY, svgWidth, svgHeight, params))
+              }
+              
+              currentX = newX
+              currentY = newY
+            }
+          }
+          break
+
         case 'Z':
           if (startX !== currentX || startY !== currentY) {
             const steps = 5
@@ -215,15 +240,18 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
     svgHeight: number,
     params: MugParameters
   ): {x: number, y: number} => {
-    // Normalize SVG coordinates (0 to 1)
-    const normalizedX = (svgX - minX) / svgWidth
-    const normalizedY = (svgY - minY) / svgHeight
+    // Convert SVG coordinates from their origin (minX, minY) to mm from origin
+    // SVG units are assumed to be in mm
+    // Invert X for left-to-right rendering (negate to flip horizontally)
+    const xInMm = (svgWidth - (svgX - minX)) + params.xOffset
+    // Flip Y coordinate (SVG Y increases downward, mug Y increases upward)
+    const yInMm = (svgHeight - (svgY - minY)) + params.yOffset
 
-    // Map to mug dimensions
-    // X is rotation around mug (0 to xRange)
-    const x = normalizedX * params.xRange
-    // Y is vertical height (0 to yRange)
-    const y = normalizedY * params.yRange
+    // Use actual mm values directly
+    // X is rotation around mug (0 to xRange in mm)
+    const x = xInMm
+    // Y is vertical height (0 to yRange in mm)
+    const y = yInMm
 
     return { x, y }
   }

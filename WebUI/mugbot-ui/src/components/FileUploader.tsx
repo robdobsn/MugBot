@@ -18,6 +18,7 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
     const parserError = svgDoc.querySelector('parsererror')
     if (parserError) {
       console.error('SVG parsing error:', parserError.textContent)
+      return paths
     }
     
     // Use wildcard selectors to find elements regardless of namespace
@@ -26,15 +27,61 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
     // Extract path elements (with and without namespace)
     const pathElements = svgDoc.querySelectorAll('path, [id*="path"]')
     console.log('Found path elements:', pathElements.length)
-    pathElements.forEach((path) => {
+    
+    if (pathElements.length === 0) {
+      console.warn('No path elements found in SVG')
+      return paths
+    }
+    pathElements.forEach((path, index) => {
       const d = path.getAttribute('d')
-      console.log('Path d:', d)
+      console.log(`Path ${index} d:`, d ? d.substring(0, 100) + '...' : 'none')
       if (d) {
+        // Get stroke/fill from style or direct attributes or parent element
+        const style = path.getAttribute('style')
+        let stroke = path.getAttribute('stroke') || 'none'
+        let fill = path.getAttribute('fill') || 'none'
+        let strokeWidth = parseFloat(path.getAttribute('stroke-width') || '1')
+        
+        // Check parent g element for inherited styles
+        let parent = path.parentElement
+        while (parent && parent.tagName !== 'svg') {
+          const parentStyle = parent.getAttribute('style')
+          if (parentStyle) {
+            if (fill === 'none') {
+              const fillMatch = parentStyle.match(/fill:\s*([^;]+)/)
+              if (fillMatch) fill = fillMatch[1].trim()
+            }
+            if (stroke === 'none') {
+              const strokeMatch = parentStyle.match(/stroke:\s*([^;]+)/)
+              if (strokeMatch) stroke = strokeMatch[1].trim()
+            }
+          }
+          if (fill === 'none' && parent.getAttribute('fill')) fill = parent.getAttribute('fill')!
+          if (stroke === 'none' && parent.getAttribute('stroke')) stroke = parent.getAttribute('stroke')!
+          parent = parent.parentElement
+        }
+        
+        if (style) {
+          const strokeMatch = style.match(/stroke:\s*([^;]+)/)
+          const fillMatch = style.match(/fill:\s*([^;]+)/)
+          const strokeWidthMatch = style.match(/stroke-width:\s*([^;]+)/)
+          if (strokeMatch) stroke = strokeMatch[1].trim()
+          if (fillMatch) fill = fillMatch[1].trim()
+          if (strokeWidthMatch) strokeWidth = parseFloat(strokeWidthMatch[1])
+        }
+        
+        // If path has fill, treat it as a stroke for drawing purposes
+        if (fill !== 'none' && stroke === 'none') {
+          stroke = fill
+        }
+        
+        console.log(`Path ${index} - stroke: ${stroke}, fill: ${fill}, strokeWidth: ${strokeWidth}`)
+        
         paths.push({
           d,
-          fill: path.getAttribute('fill') || 'none',
-          stroke: path.getAttribute('stroke') || 'black',
-          strokeWidth: parseFloat(path.getAttribute('stroke-width') || '1')
+          fill: 'none', // Always use none for fill, only stroke outlines
+          stroke: stroke === 'none' ? 'black' : stroke,
+          strokeWidth: strokeWidth || 1
         })
       }
     })
@@ -135,6 +182,12 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
     })
 
     console.log('Total paths extracted:', paths.length)
+    console.log('Paths summary:', paths.map((p, i) => ({
+      index: i,
+      dLength: p.d.length,
+      stroke: p.stroke,
+      strokeWidth: p.strokeWidth
+    })))
     return paths
   }
 

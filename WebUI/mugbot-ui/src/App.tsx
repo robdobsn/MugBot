@@ -10,6 +10,8 @@ export interface MugParameters {
   yRange: number // 0-80 (height up the mug)
   extrusionRate: number
   duetIp: string
+  xOffset: number // X offset in mm
+  yOffset: number // Y offset in mm
 }
 
 function App() {
@@ -19,7 +21,9 @@ function App() {
     xRange: 280,
     yRange: 80,
     extrusionRate: 1.0,
-    duetIp: '192.168.1.100'
+    duetIp: '192.168.1.100',
+    xOffset: 0,
+    yOffset: 0
   })
 
   const handleSvgLoad = (data: string, paths: any[]) => {

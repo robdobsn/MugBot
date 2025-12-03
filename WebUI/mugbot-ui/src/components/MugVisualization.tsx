@@ -17,6 +17,7 @@ interface MugMeshProps {
 function MugMesh({ svgPaths, parameters }: MugMeshProps) {
   const mugRef = useRef<THREE.Mesh>(null)
   const pathsRef = useRef<THREE.Group>(null)
+  const handleRef = useRef<THREE.Group>(null)
 
   useFrame(() => {
     if (mugRef.current) {
@@ -24,6 +25,9 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
     }
     if (pathsRef.current) {
       pathsRef.current.rotation.y += 0.002
+    }
+    if (handleRef.current) {
+      handleRef.current.rotation.y += 0.002
     }
   })
 
@@ -158,6 +162,30 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
           }
           break
 
+        case 'Q': // Quadratic Bezier curve
+          for (let i = 0; i < coords.length; i += 4) {
+            if (coords[i] !== undefined && coords[i + 1] !== undefined && 
+                coords[i + 2] !== undefined && coords[i + 3] !== undefined) {
+              const cpX = type === 'Q' ? coords[i] : currentX + coords[i]
+              const cpY = type === 'Q' ? coords[i + 1] : currentY + coords[i + 1]
+              const newX = type === 'Q' ? coords[i + 2] : currentX + coords[i + 2]
+              const newY = type === 'Q' ? coords[i + 3] : currentY + coords[i + 3]
+              
+              // Approximate quadratic bezier with line segments
+              const steps = 10
+              for (let step = 0; step <= steps; step++) {
+                const t = step / steps
+                const x = (1 - t) * (1 - t) * currentX + 2 * (1 - t) * t * cpX + t * t * newX
+                const y = (1 - t) * (1 - t) * currentY + 2 * (1 - t) * t * cpY + t * t * newY
+                points.push(convertToMugSurface(x, y, minX, minY, svgWidth, svgHeight, mugRadius, params))
+              }
+              
+              currentX = newX
+              currentY = newY
+            }
+          }
+          break
+
         case 'Z': // Close path
           if (startX !== currentX || startY !== currentY) {
             const steps = 10
@@ -187,13 +215,19 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
     radius: number,
     params: MugParameters
   ): THREE.Vector3 => {
-    // Normalize SVG coordinates (0 to 1)
-    const normalizedX = (svgX - minX) / svgWidth
-    const normalizedY = (svgY - minY) / svgHeight
+    // Convert SVG coordinates from their origin (minX, minY) to mm from origin
+    // SVG units are assumed to be in mm
+    // Invert X for left-to-right rendering (negate to flip horizontally)
+    const xInMm = (svgWidth - (svgX - minX)) + params.xOffset
+    // Flip Y coordinate (SVG Y increases downward, mug Y increases upward)
+    const yInMm = (svgHeight - (svgY - minY)) + params.yOffset
 
-    // Map to mug dimensions
-    const angle = normalizedX * (params.xRange / radius) // X wraps around the cylinder
-    const height = normalizedY * params.yRange - params.yRange / 2 // Y is vertical, centered
+    // Map to mug dimensions using actual mm values
+    // X wraps around the cylinder (xRange is the usable circumference in mm)
+    // Calculate angle as a fraction of the full circumference (2π radians)
+    const angle = (xInMm / params.xRange) * Math.PI * 2
+    // Y is vertical height (yRange is the height in mm), centered
+    const height = (yInMm / params.yRange) * params.yRange - params.yRange / 2
 
     // Convert to 3D cylindrical coordinates
     const x = radius * Math.cos(angle)
@@ -212,6 +246,40 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
     }
   }, [pathGroup])
 
+  // Create handle at X=-20mm position
+  const handleGroup = useMemo(() => {
+    const group = new THREE.Group()
+    const handleWidth = 18 // 18mm wide (depth from mug)
+    const handleHeight = 60 // 60mm high
+    const handleDepth = 4 // thickness of the handle material
+    const xPosition = -20 // -20mm from center
+    
+    // Calculate angle for X position on cylinder
+    const angle = (xPosition / parameters.xRange) * (2 * Math.PI)
+    
+    // Position the handle attached to the outer surface of the mug
+    const handleOuterRadius = mugRadius + handleWidth / 2
+    const handleX = handleOuterRadius * Math.cos(angle)
+    const handleZ = handleOuterRadius * Math.sin(angle)
+    
+    // Create handle using a torus (vertical orientation)
+    const torusGeometry = new THREE.TorusGeometry(handleHeight / 2, handleDepth / 2, 8, 16, Math.PI)
+    const handleMaterial = new THREE.MeshStandardMaterial({ 
+      color: "#e0e0e0",
+      transparent: true,
+      opacity: 0.5
+    })
+    const torus = new THREE.Mesh(torusGeometry, handleMaterial)
+    
+    // Position and rotate the handle (vertical orientation, facing outward)
+    torus.position.set(handleX, 0, handleZ)
+    torus.rotation.y = angle - Math.PI / 2 // rotate to face outward from mug
+    torus.scale.x = handleWidth / handleHeight // make it narrower horizontally
+    
+    group.add(torus)
+    return group
+  }, [parameters.xRange, mugRadius, mugHeight])
+
   return (
     <>
       {/* Mug cylinder */}
@@ -224,6 +292,9 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
           side={THREE.DoubleSide}
         />
       </mesh>
+
+      {/* Mug handle */}
+      <primitive object={handleGroup} ref={handleRef} />
 
       {/* SVG paths wrapped on cylinder */}
       {pathGroup && (
@@ -238,10 +309,10 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
 
 function MugVisualization({ svgPaths, parameters }: MugVisualizationProps) {
   return (
-    <div style={{ width: '100%', height: '600px', background: '#f0f0f0' }}>
+    <div style={{ width: '100%', height: '800px', background: '#f0f0f0' }}>
       <Canvas>
-        <PerspectiveCamera makeDefault position={[60, 40, 60]} />
-        <OrbitControls enableDamping dampingFactor={0.05} />
+        <PerspectiveCamera makeDefault position={[120, 0, 0]} fov={50} />
+        <OrbitControls enableDamping dampingFactor={0.05} target={[0, 0, 0]} />
         
         <ambientLight intensity={0.5} />
         <directionalLight position={[10, 10, 5]} intensity={1} />
