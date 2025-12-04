@@ -1,13 +1,13 @@
 import { useRef, type ChangeEvent } from 'react'
 
 interface FileUploaderProps {
-  onFileLoad: (data: string, paths: any[]) => void
+  onFileLoad: (data: string, paths: any[], viewBox?: { width: number, height: number }) => void
 }
 
 function FileUploader({ onFileLoad }: FileUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const parseSvgPaths = (svgContent: string) => {
+  const parseSvgPaths = (svgContent: string): { paths: any[], viewBox: { width: number, height: number } | null } => {
     const parser = new DOMParser()
     const svgDoc = parser.parseFromString(svgContent, 'image/svg+xml')
     const paths: any[] = []
@@ -18,7 +18,29 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
     const parserError = svgDoc.querySelector('parsererror')
     if (parserError) {
       console.error('SVG parsing error:', parserError.textContent)
-      return paths
+      return { paths, viewBox: null }
+    }
+    
+    // Extract viewBox dimensions
+    const svgElement = svgDoc.querySelector('svg')
+    let viewBox = null
+    if (svgElement) {
+      const viewBoxAttr = svgElement.getAttribute('viewBox')
+      if (viewBoxAttr) {
+        const [, , width, height] = viewBoxAttr.split(/\s+/).map(parseFloat)
+        viewBox = { width, height }
+        console.log('SVG viewBox:', viewBox)
+      } else {
+        // Try width/height attributes
+        const widthAttr = svgElement.getAttribute('width')
+        const heightAttr = svgElement.getAttribute('height')
+        if (widthAttr && heightAttr) {
+          const width = parseFloat(widthAttr.replace(/mm|px/, ''))
+          const height = parseFloat(heightAttr.replace(/mm|px/, ''))
+          viewBox = { width, height }
+          console.log('SVG dimensions from width/height:', viewBox)
+        }
+      }
     }
     
     // Use wildcard selectors to find elements regardless of namespace
@@ -30,7 +52,7 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
     
     if (pathElements.length === 0) {
       console.warn('No path elements found in SVG')
-      return paths
+      return { paths, viewBox }
     }
     pathElements.forEach((path, index) => {
       const d = path.getAttribute('d')
@@ -42,9 +64,16 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
         let fill = path.getAttribute('fill') || 'none'
         let strokeWidth = parseFloat(path.getAttribute('stroke-width') || '1')
         
-        // Check parent g element for inherited styles
+        // Extract transform from element or parent groups
+        let transform = path.getAttribute('transform')
+        
+        // Check parent g element for inherited styles and transforms
         let parent = path.parentElement
         while (parent && parent.tagName !== 'svg') {
+          // Get transform from parent if not already set
+          if (!transform && parent.getAttribute('transform')) {
+            transform = parent.getAttribute('transform')
+          }
           const parentStyle = parent.getAttribute('style')
           if (parentStyle) {
             if (fill === 'none') {
@@ -75,13 +104,14 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
           stroke = fill
         }
         
-        console.log(`Path ${index} - stroke: ${stroke}, fill: ${fill}, strokeWidth: ${strokeWidth}`)
+        console.log(`Path ${index} - stroke: ${stroke}, fill: ${fill}, strokeWidth: ${strokeWidth}, transform: ${transform || 'none'}`)
         
         paths.push({
           d,
           fill: 'none', // Always use none for fill, only stroke outlines
           stroke: stroke === 'none' ? 'black' : stroke,
-          strokeWidth: strokeWidth || 1
+          strokeWidth: strokeWidth || 1,
+          transform: transform || null
         })
       }
     })
@@ -188,7 +218,7 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
       stroke: p.stroke,
       strokeWidth: p.strokeWidth
     })))
-    return paths
+    return { paths, viewBox }
   }
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -199,10 +229,11 @@ function FileUploader({ onFileLoad }: FileUploaderProps) {
     reader.onload = (e) => {
       const content = e.target?.result as string
       if (content) {
-        const paths = parseSvgPaths(content)
-        console.log('Parsed SVG paths:', paths)
-        console.log('Total paths found:', paths.length)
-        onFileLoad(content, paths)
+        const result = parseSvgPaths(content)
+        console.log('Parsed SVG paths:', result.paths)
+        console.log('Total paths found:', result.paths.length)
+        console.log('ViewBox:', result.viewBox)
+        onFileLoad(content, result.paths, result.viewBox || undefined)
       }
     }
     reader.readAsText(file)

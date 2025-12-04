@@ -7,14 +7,16 @@ import { type MugParameters } from '../App'
 interface MugVisualizationProps {
   svgPaths: any[]
   parameters: MugParameters
+  viewBox?: { width: number, height: number }
 }
 
 interface MugMeshProps {
   svgPaths: any[]
   parameters: MugParameters
+  viewBox?: { width: number, height: number }
 }
 
-function MugMesh({ svgPaths, parameters }: MugMeshProps) {
+function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
   const mugRef = useRef<THREE.Mesh>(null)
   const pathsRef = useRef<THREE.Group>(null)
   const handleRef = useRef<THREE.Group>(null)
@@ -47,7 +49,8 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
 
     svgPaths.forEach((pathData, index) => {
       console.log(`Processing path ${index}:`, pathData.d)
-      const points = parseSvgPath(pathData.d, parameters)
+      console.log(`Path ${index} transform:`, pathData.transform)
+      const points = parseSvgPath(pathData.d, parameters, viewBox, pathData.transform)
       console.log(`Path ${index} generated ${points.length} 3D points`)
       
       if (points.length > 1) {
@@ -66,7 +69,48 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
     return group
   }
 
-  const parseSvgPath = (pathD: string, params: MugParameters): THREE.Vector3[] => {
+  // Parse SVG transform matrix
+  const parseTransform = (transformStr: string | null): { a: number, b: number, c: number, d: number, e: number, f: number } | null => {
+    if (!transformStr) return null
+    
+    // Parse matrix(a,b,c,d,e,f) format
+    const matrixMatch = transformStr.match(/matrix\(([-\d.,\s]+)\)/)
+    if (matrixMatch) {
+      const values = matrixMatch[1].split(/[\s,]+/).map(parseFloat)
+      if (values.length === 6) {
+        return { a: values[0], b: values[1], c: values[2], d: values[3], e: values[4], f: values[5] }
+      }
+    }
+    
+    // Parse translate(x,y) format
+    const translateMatch = transformStr.match(/translate\(([-\d.,\s]+)\)/)
+    if (translateMatch) {
+      const values = translateMatch[1].split(/[\s,]+/).map(parseFloat)
+      const tx = values[0] || 0
+      const ty = values[1] || 0
+      return { a: 1, b: 0, c: 0, d: 1, e: tx, f: ty }
+    }
+    
+    // Parse scale(x,y) format
+    const scaleMatch = transformStr.match(/scale\(([-\d.,\s]+)\)/)
+    if (scaleMatch) {
+      const values = scaleMatch[1].split(/[\s,]+/).map(parseFloat)
+      const sx = values[0] || 1
+      const sy = values[1] || sx
+      return { a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 }
+    }
+    
+    return null
+  }
+  
+  // Apply transform matrix to point
+  const applyTransform = (x: number, y: number, matrix: { a: number, b: number, c: number, d: number, e: number, f: number }): [number, number] => {
+    const newX = matrix.a * x + matrix.c * y + matrix.e
+    const newY = matrix.b * x + matrix.d * y + matrix.f
+    return [newX, newY]
+  }
+
+  const parseSvgPath = (pathD: string, params: MugParameters, vb?: { width: number, height: number }, transformStr?: string | null): THREE.Vector3[] => {
     const points: THREE.Vector3[] = []
     const commands = pathD.match(/[MmLlHhVvCcSsQqTtAaZz][^MmLlHhVvCcSsQqTtAaZz]*/g) || []
     
@@ -75,25 +119,17 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
     let startX = 0
     let startY = 0
 
-    // Find SVG bounds for normalization
-    let minX = Infinity, maxX = -Infinity
-    let minY = Infinity, maxY = -Infinity
+    // Use viewBox dimensions if available, otherwise calculate bounds
+    const svgWidth = vb?.width || 280
+    const svgHeight = vb?.height || 80
+    const minX = 0
+    const minY = 0
     
-    commands.forEach(cmd => {
-      const coords = cmd.slice(1).trim().split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n))
-      
-      for (let i = 0; i < coords.length; i += 2) {
-        if (coords[i] !== undefined) minX = Math.min(minX, coords[i])
-        if (coords[i] !== undefined) maxX = Math.max(maxX, coords[i])
-        if (coords[i + 1] !== undefined) minY = Math.min(minY, coords[i + 1])
-        if (coords[i + 1] !== undefined) maxY = Math.max(maxY, coords[i + 1])
-      }
-    })
-
-    const svgWidth = maxX - minX || 1
-    const svgHeight = maxY - minY || 1
+    // Parse transform if provided
+    const transform = parseTransform(transformStr || null)
     
-    console.log('SVG bounds:', { minX, maxX, minY, maxY, svgWidth, svgHeight })
+    console.log('Using SVG dimensions:', { svgWidth, svgHeight, minX, minY })
+    console.log('Transform matrix:', transform)
 
     commands.forEach(cmd => {
       const type = cmd[0]
@@ -106,8 +142,10 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
             currentY = type === 'M' ? coords[1] : currentY + coords[1]
             startX = currentX
             startY = currentY
+            // Apply transform if present
+            let [transformedX, transformedY] = transform ? applyTransform(currentX, currentY, transform) : [currentX, currentY]
             // Add the starting point
-            points.push(convertToMugSurface(currentX, currentY, minX, minY, svgWidth, svgHeight, mugRadius, params))
+            points.push(convertToMugSurface(transformedX, transformedY, minX, minY, svgWidth, svgHeight, mugRadius, params))
           }
           break
 
@@ -123,7 +161,8 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
                 const t = step / steps
                 const x = currentX + (newX - currentX) * t
                 const y = currentY + (newY - currentY) * t
-                points.push(convertToMugSurface(x, y, minX, minY, svgWidth, svgHeight, mugRadius, params))
+                const [tx, ty] = transform ? applyTransform(x, y, transform) : [x, y]
+                points.push(convertToMugSurface(tx, ty, minX, minY, svgWidth, svgHeight, mugRadius, params))
               }
               
               currentX = newX
@@ -140,7 +179,8 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
               for (let step = 0; step <= steps; step++) {
                 const t = step / steps
                 const x = currentX + (newX - currentX) * t
-                points.push(convertToMugSurface(x, currentY, minX, minY, svgWidth, svgHeight, mugRadius, params))
+                const [tx, ty] = transform ? applyTransform(x, currentY, transform) : [x, currentY]
+                points.push(convertToMugSurface(tx, ty, minX, minY, svgWidth, svgHeight, mugRadius, params))
               }
               currentX = newX
             }
@@ -155,8 +195,38 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
               for (let step = 0; step <= steps; step++) {
                 const t = step / steps
                 const y = currentY + (newY - currentY) * t
-                points.push(convertToMugSurface(currentX, y, minX, minY, svgWidth, svgHeight, mugRadius, params))
+                const [tx, ty] = transform ? applyTransform(currentX, y, transform) : [currentX, y]
+                points.push(convertToMugSurface(tx, ty, minX, minY, svgWidth, svgHeight, mugRadius, params))
               }
+              currentY = newY
+            }
+          }
+          break
+
+        case 'C': // Cubic Bezier curve
+          for (let i = 0; i < coords.length; i += 6) {
+            if (coords[i] !== undefined && coords[i + 1] !== undefined && 
+                coords[i + 2] !== undefined && coords[i + 3] !== undefined &&
+                coords[i + 4] !== undefined && coords[i + 5] !== undefined) {
+              const cp1X = type === 'C' ? coords[i] : currentX + coords[i]
+              const cp1Y = type === 'C' ? coords[i + 1] : currentY + coords[i + 1]
+              const cp2X = type === 'C' ? coords[i + 2] : currentX + coords[i + 2]
+              const cp2Y = type === 'C' ? coords[i + 3] : currentY + coords[i + 3]
+              const newX = type === 'C' ? coords[i + 4] : currentX + coords[i + 4]
+              const newY = type === 'C' ? coords[i + 5] : currentY + coords[i + 5]
+              
+              // Approximate cubic bezier with line segments
+              const steps = 10
+              for (let step = 0; step <= steps; step++) {
+                const t = step / steps
+                const mt = 1 - t
+                const x = mt * mt * mt * currentX + 3 * mt * mt * t * cp1X + 3 * mt * t * t * cp2X + t * t * t * newX
+                const y = mt * mt * mt * currentY + 3 * mt * mt * t * cp1Y + 3 * mt * t * t * cp2Y + t * t * t * newY
+                const [tx, ty] = transform ? applyTransform(x, y, transform) : [x, y]
+                points.push(convertToMugSurface(tx, ty, minX, minY, svgWidth, svgHeight, mugRadius, params))
+              }
+              
+              currentX = newX
               currentY = newY
             }
           }
@@ -177,7 +247,8 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
                 const t = step / steps
                 const x = (1 - t) * (1 - t) * currentX + 2 * (1 - t) * t * cpX + t * t * newX
                 const y = (1 - t) * (1 - t) * currentY + 2 * (1 - t) * t * cpY + t * t * newY
-                points.push(convertToMugSurface(x, y, minX, minY, svgWidth, svgHeight, mugRadius, params))
+                const [tx, ty] = transform ? applyTransform(x, y, transform) : [x, y]
+                points.push(convertToMugSurface(tx, ty, minX, minY, svgWidth, svgHeight, mugRadius, params))
               }
               
               currentX = newX
@@ -193,7 +264,8 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
               const t = step / steps
               const x = currentX + (startX - currentX) * t
               const y = currentY + (startY - currentY) * t
-              points.push(convertToMugSurface(x, y, minX, minY, svgWidth, svgHeight, mugRadius, params))
+              const [tx, ty] = transform ? applyTransform(x, y, transform) : [x, y]
+              points.push(convertToMugSurface(tx, ty, minX, minY, svgWidth, svgHeight, mugRadius, params))
             }
           }
           currentX = startX
@@ -237,7 +309,7 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
     return new THREE.Vector3(x, y, z)
   }
 
-  const pathGroup = useMemo(() => createPathGeometry(), [svgPaths, parameters])
+  const pathGroup = useMemo(() => createPathGeometry(), [svgPaths, parameters, viewBox])
 
   // Update the pathsRef when pathGroup changes
   useEffect(() => {
@@ -336,7 +408,7 @@ function MugMesh({ svgPaths, parameters }: MugMeshProps) {
   )
 }
 
-function MugVisualization({ svgPaths, parameters }: MugVisualizationProps) {
+function MugVisualization({ svgPaths, parameters, viewBox }: MugVisualizationProps) {
   return (
     <div style={{ width: '100%', height: '800px', background: '#f0f0f0' }}>
       <Canvas>
@@ -347,7 +419,7 @@ function MugVisualization({ svgPaths, parameters }: MugVisualizationProps) {
         <directionalLight position={[10, 10, 5]} intensity={1} />
         <directionalLight position={[-10, -10, -5]} intensity={0.5} />
         
-        <MugMesh svgPaths={svgPaths} parameters={parameters} />
+        <MugMesh svgPaths={svgPaths} parameters={parameters} viewBox={viewBox} />
       </Canvas>
       
       {svgPaths.length === 0 && (
