@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
+    <name>Spaghetti Effect</name>
+    <id>org.inkscape.effect.spaghetti</id>
+    
+    <param name="tab" type="notebook">
+        <page name="settings" gui-text="Settings">
+            <label appearance="header">Line Parameters</label>
+            <param name="line_length" type="float" min="100" max="50000" gui-text="Total line length:">5000.0</param>
+            <param name="segment_length" type="float" min="1" max="30" gui-text="Segment length:">3.0</param>
+            <param name="wiggle_amount" type="float" min="1" max="60" gui-text="Wiggle amount (degrees):">15.0</param>
+            <label>Smaller segments = more detail and wiggliness</label>
+            
+            <spacer/>
+            <label appearance="header">Curvature Control</label>
+            <param name="max_curvature" type="float" min="0.2" max="3.0" precision="2" gui-text="Maximum curvature:">1.5</param>
+            <param name="smoothness" type="int" min="2" max="15" gui-text="Smoothness (higher=smoother):">6</param>
+            <param name="num_strands" type="int" min="1" max="50" gui-text="Number of strands:">8</param>
+            <label>Higher curvature = more wiggly. More strands = denser tangled effect.</label>
+            
+            <spacer/>
+            <label appearance="header">Density Parameters</label>
+            <param name="min_density" type="float" min="0" max="1" precision="2" gui-text="Min density (empty areas):">0.3</param>
+            <param name="max_density" type="float" min="0" max="1" precision="2" gui-text="Max density (filled areas):">1.0</param>
+            <param name="sample_resolution" type="int" min="5" max="50" gui-text="Sample resolution (pixels):">10</param>
+            
+            <spacer/>
+            <label appearance="header">Boundary Options</label>
+            <param name="use_page" type="bool" gui-text="Use page bounds (not selection)">true</param>
+            <param name="margin" type="float" min="0" max="100" gui-text="Margin from edges:">10.0</param>
+        </page>
+        
+        <page name="appearance" gui-text="Appearance">
+            <label appearance="header">Stroke Settings</label>
+            <param name="stroke_width" type="float" min="0.1" max="10" precision="1" gui-text="Stroke width:">0.5</param>
+            <param name="stroke_color" type="color" gui-text="Stroke color:">#000000ff</param>
+            <label>Paths are drawn with stroke only (no fill)</label>
+        </page>
+        
+        <page name="help" gui-text="Help">
+            <label xml:space="preserve">
+Spaghetti Effect Extension
+
+This extension generates a wiggly "spaghetti" line that fills
+the page or selection with varying density based on filled objects.
+
+How to use:
+1. Create filled shapes in your document (e.g., circles, rectangles)
+2. Run this extension: Extensions → Generate from Path → Spaghetti Effect
+3. Adjust parameters as needed:
+   - Line length: Total length of the spaghetti strand
+   - Segment length: Size of each wiggly segment
+   - Wiggle amount: How much the line changes direction
+   - Density: How dense the pattern is in filled vs empty areas
+
+The effect creates more line crossings and coverage where
+there are filled objects, making them visible through the
+density of the "spaghetti" pattern.
+
+Tips:
+- Increase line length for more coverage
+- Decrease segment length for finer detail
+- Adjust min/max density to control contrast
+- Use smaller sample resolution for better accuracy (slower)
+            </label>
+        </page>
+    </param>
+    
+    <effect>
+        <object-type>all</object-type>
+        <effects-menu>
+            <submenu name="Generate from Path"/>
+        </effects-menu>
+    </effect>
+    
+    <script>
+        <command location="inx" interpreter="python">spaghetti.py</command>
+    </script>
+</inkscape-extension>
