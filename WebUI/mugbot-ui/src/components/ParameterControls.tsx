@@ -1,4 +1,5 @@
 import { type MugParameters } from '../App'
+import { type InfillParameters } from '../types/infill'
 
 interface ParameterControlsProps {
   parameters: MugParameters
@@ -10,6 +11,16 @@ function ParameterControls({ parameters, onChange }: ParameterControlsProps) {
     onChange({
       ...parameters,
       [field]: value
+    })
+  }
+
+  const handleInfillChange = (field: keyof InfillParameters, value: number | boolean) => {
+    onChange({
+      ...parameters,
+      infill: {
+        ...parameters.infill,
+        [field]: value
+      }
     })
   }
 
@@ -126,6 +137,96 @@ function ParameterControls({ parameters, onChange }: ParameterControlsProps) {
           Enter the IP address of your Duet 2 controller
         </small>
       </div>
+
+      <hr className="my-4" />
+
+      <h5 className="mb-3">Infill Settings</h5>
+
+      <div className="mb-3 form-check">
+        <input
+          type="checkbox"
+          className="form-check-input"
+          id="infillEnabled"
+          checked={parameters.infill.enabled}
+          onChange={(e) => handleInfillChange('enabled', e.target.checked)}
+        />
+        <label className="form-check-label" htmlFor="infillEnabled">
+          Enable Infill
+        </label>
+        <small className="form-text text-muted d-block">
+          Fill closed shapes with horizontal lines (around circumference)
+        </small>
+      </div>
+
+      {parameters.infill.enabled && (
+        <>
+          <div className="mb-3">
+            <label className="form-label">
+              Minimum Shape Size: {parameters.infill.minSize.toFixed(1)}mm
+            </label>
+            <input
+              type="range"
+              className="form-range"
+              min="1"
+              max="50"
+              step="0.5"
+              value={parameters.infill.minSize}
+              onChange={(e) => handleInfillChange('minSize', parseFloat(e.target.value))}
+            />
+            <div className="d-flex justify-content-between">
+              <small className="text-muted">1mm</small>
+              <small className="text-muted">50mm</small>
+            </div>
+            <small className="form-text text-muted">
+              Only fill shapes larger than this size
+            </small>
+          </div>
+
+          <div className="mb-3">
+            <label className="form-label">
+              Line Spacing: {parameters.infill.lineSpacing.toFixed(1)}mm
+            </label>
+            <input
+              type="range"
+              className="form-range"
+              min="0.5"
+              max="10"
+              step="0.1"
+              value={parameters.infill.lineSpacing}
+              onChange={(e) => handleInfillChange('lineSpacing', parseFloat(e.target.value))}
+            />
+            <div className="d-flex justify-content-between">
+              <small className="text-muted">0.5mm</small>
+              <small className="text-muted">10mm</small>
+            </div>
+            <small className="form-text text-muted">
+              Distance between infill lines
+            </small>
+          </div>
+
+          <div className="mb-3">
+            <label className="form-label">
+              Infill Angle: {parameters.infill.angle}°
+            </label>
+            <input
+              type="range"
+              className="form-range"
+              min="-90"
+              max="90"
+              step="5"
+              value={parameters.infill.angle}
+              onChange={(e) => handleInfillChange('angle', parseFloat(e.target.value))}
+            />
+            <div className="d-flex justify-content-between">
+              <small className="text-muted">-90°</small>
+              <small className="text-muted">90°</small>
+            </div>
+            <small className="form-text text-muted">
+              Rotation angle for infill lines
+            </small>
+          </div>
+        </>
+      )}
 
       <div className="alert alert-info small mb-0">
         <strong>Note:</strong> Z position is fixed at 0. Use bed calibration on your Duet 2 to adjust the mug surface height.

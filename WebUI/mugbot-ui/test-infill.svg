@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">
+  <!-- Large rectangle - should get infill -->
+  <rect x="10" y="10" width="50" height="40" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Circle - should get infill -->
+  <circle cx="100" cy="30" r="20" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Small rectangle - might be filtered out depending on minSize -->
+  <rect x="150" y="10" width="8" height="8" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Closed path (triangle) - should get infill -->
+  <path d="M 30 80 L 60 80 L 45 100 Z" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Ellipse - should get infill -->
+  <ellipse cx="120" cy="90" rx="25" ry="15" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Polygon (pentagon) - should get infill -->
+  <polygon points="170,70 185,80 180,95 160,95 155,80" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Complex closed path with curves - should get infill -->
+  <path d="M 20 120 Q 30 110 40 120 L 50 130 Q 40 140 30 130 Z" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Open path - should NOT get infill -->
+  <path d="M 80 120 L 100 120 L 110 140" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Very small circle - might be filtered -->
+  <circle cx="130" cy="130" r="3" fill="none" stroke="black" stroke-width="1"/>
+  
+  <!-- Large hexagon - should get infill -->
+  <polygon points="150,115 165,120 165,135 150,140 135,135 135,120" fill="none" stroke="black" stroke-width="1"/>
+</svg>

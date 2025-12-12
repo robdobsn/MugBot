@@ -4,6 +4,7 @@ import FileUploader from './components/FileUploader'
 import MugVisualization from './components/MugVisualization'
 import ParameterControls from './components/ParameterControls'
 import GCodeGenerator from './components/GCodeGenerator'
+import { type InfillParameters } from './types/infill'
 
 export interface MugParameters {
   xRange: number // 0-280 (rotation around mug)
@@ -12,6 +13,7 @@ export interface MugParameters {
   duetIp: string
   xOffset: number // X offset in mm
   yOffset: number // Y offset in mm
+  infill: InfillParameters
 }
 
 function App() {
@@ -24,7 +26,13 @@ function App() {
     extrusionRate: 1.0,
     duetIp: '192.168.1.100',
     xOffset: 0,
-    yOffset: 0
+    yOffset: 0,
+    infill: {
+      enabled: false,
+      minSize: 5.0,
+      lineSpacing: 2.0,
+      angle: 0
+    }
   })
 
   const handleSvgLoad = (data: string, paths: any[], viewBoxData?: { width: number, height: number }) => {

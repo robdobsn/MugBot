@@ -3,6 +3,8 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import * as THREE from 'three'
 import { type MugParameters } from '../App'
+import { extractClosedShapes, filterShapesBySize } from '../utils/shapeAnalysis'
+import { generateInfillForShapes } from '../utils/infillGenerator'
 
 interface MugVisualizationProps {
   svgPaths: any[]
@@ -19,6 +21,7 @@ interface MugMeshProps {
 function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
   const mugRef = useRef<THREE.Mesh>(null)
   const pathsRef = useRef<THREE.Group>(null)
+  const infillRef = useRef<THREE.Group>(null)
   const handleRef = useRef<THREE.Group>(null)
 
   useFrame(() => {
@@ -27,6 +30,9 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
     }
     if (pathsRef.current) {
       pathsRef.current.rotation.y += 0.002
+    }
+    if (infillRef.current) {
+      infillRef.current.rotation.y += 0.002
     }
     if (handleRef.current) {
       handleRef.current.rotation.y += 0.002
@@ -67,6 +73,103 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
 
     console.log('Total lines in group:', group.children.length)
     return group
+  }
+
+  // Create infill geometry
+  const createInfillGeometry = () => {
+    if (!parameters.infill.enabled || svgPaths.length === 0) {
+      return null
+    }
+
+    console.log('Creating infill geometry...')
+    const group = new THREE.Group()
+
+    try {
+      // Create SVG content from paths
+      const svgContent = createSVGFromPaths(svgPaths)
+      
+      // Extract closed shapes
+      const allShapes = extractClosedShapes(svgContent)
+      console.log('Infill: Found', allShapes.length, 'closed shapes')
+      
+      // Filter by minimum size
+      const filteredShapes = filterShapesBySize(allShapes, parameters.infill.minSize)
+      console.log('Infill: ', filteredShapes.length, 'shapes meet minimum size')
+      
+      // Generate infill for each shape
+      const infillMap = generateInfillForShapes(filteredShapes, parameters.infill)
+      
+      let totalLines = 0
+      infillMap.forEach((infillLines, shapeId) => {
+        infillLines.forEach(line => {
+          // Convert infill line to 3D points on mug surface
+          const start = convertInfillPointToMugSurface(line.start, parameters, mugRadius)
+          const end = convertInfillPointToMugSurface(line.end, parameters, mugRadius)
+          
+          const points = [start, end]
+          const geometry = new THREE.BufferGeometry().setFromPoints(points)
+          const material = new THREE.LineBasicMaterial({ 
+            color: 0x00ff00,  // Green for infill
+            linewidth: 1,
+            opacity: 0.7,
+            transparent: true
+          })
+          const lineObj = new THREE.Line(geometry, material)
+          group.add(lineObj)
+          totalLines++
+        })
+      })
+      
+      console.log('Infill: Created', totalLines, 'line segments')
+    } catch (error) {
+      console.error('Error creating infill geometry:', error)
+    }
+
+    return group
+  }
+
+  // Helper to create SVG content from paths
+  const createSVGFromPaths = (paths: any[]): string => {
+    const pathElements = paths.map((p, i) => 
+      `<path id="path-${i}" d="${p.d}" />`
+    ).join('\n')
+    
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg">
+${pathElements}
+</svg>`
+  }
+
+  // Convert infill point to mug surface
+  const convertInfillPointToMugSurface = (
+    point: { x: number, y: number },
+    params: MugParameters,
+    radius: number
+  ): THREE.Vector3 => {
+    // Infill points are in SVG coordinates (mm)
+    // Need to match the conversion used for SVG paths
+    const svgWidth = viewBox?.width || 280
+    const svgHeight = viewBox?.height || 80
+    const minX = 0
+    const minY = 0
+    
+    // Apply the same transformation as SVG paths
+    // Invert X for left-to-right rendering
+    const xInMm = (svgWidth - (point.x - minX)) + params.xOffset
+    // Flip Y coordinate (SVG Y increases downward, mug Y increases upward)
+    const yInMm = (svgHeight - (point.y - minY)) + params.yOffset
+
+    // Map to cylindrical coordinates with handle offset
+    const handleXPosition = -20 // mm
+    const angleOffset = (handleXPosition / params.xRange) * Math.PI * 2
+    const angle = (xInMm / params.xRange) * Math.PI * 2 - angleOffset
+    const height = (yInMm / params.yRange) * params.yRange - params.yRange / 2
+
+    const x = radius * Math.cos(angle)
+    const y = height
+    const z = radius * Math.sin(angle)
+
+    return new THREE.Vector3(x, y, z)
   }
 
   // Parse SVG transform matrix
@@ -296,8 +399,11 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
 
     // Map to mug dimensions using actual mm values
     // X wraps around the cylinder (xRange is the usable circumference in mm)
+    // Handle is at X=-20mm, so X=0 should be 20mm from handle position
     // Calculate angle as a fraction of the full circumference (2π radians)
-    const angle = (xInMm / params.xRange) * Math.PI * 2
+    const handleXPosition = -20 // mm
+    const angleOffset = (handleXPosition / params.xRange) * Math.PI * 2
+    const angle = (xInMm / params.xRange) * Math.PI * 2 - angleOffset
     // Y is vertical height (yRange is the height in mm), centered
     const height = (yInMm / params.yRange) * params.yRange - params.yRange / 2
 
@@ -310,6 +416,7 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
   }
 
   const pathGroup = useMemo(() => createPathGeometry(), [svgPaths, parameters, viewBox])
+  const infillGroup = useMemo(() => createInfillGeometry(), [svgPaths, parameters, viewBox])
 
   // Update the pathsRef when pathGroup changes
   useEffect(() => {
@@ -317,6 +424,13 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
       console.log('Updating pathsRef with new geometry')
     }
   }, [pathGroup])
+
+  // Update the infillRef when infillGroup changes
+  useEffect(() => {
+    if (infillRef.current && infillGroup) {
+      console.log('Updating infillRef with new geometry')
+    }
+  }, [infillGroup])
 
   // Create handle on the side of the mug at X=-20mm (rotation position)
   const handleGroup = useMemo(() => {
@@ -400,6 +514,11 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
       {/* SVG paths wrapped on cylinder */}
       {pathGroup && (
         <primitive object={pathGroup} ref={pathsRef} />
+      )}
+
+      {/* Infill lines */}
+      {infillGroup && (
+        <primitive object={infillGroup} ref={infillRef} />
       )}
 
       {/* Grid helper */}

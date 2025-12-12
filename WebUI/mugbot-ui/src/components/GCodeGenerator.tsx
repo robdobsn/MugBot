@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { type MugParameters } from '../App'
+import { extractClosedShapes, filterShapesBySize } from '../utils/shapeAnalysis'
+import { generateInfillForShapes } from '../utils/infillGenerator'
 
 interface GCodeGeneratorProps {
   svgPaths: any[]
   parameters: MugParameters
+  viewBox?: { width: number, height: number }
 }
 
-function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
+function GCodeGenerator({ svgPaths, parameters, viewBox }: GCodeGeneratorProps) {
   const [gcode, setGcode] = useState<string>('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [isSending, setIsSending] = useState(false)
@@ -49,7 +52,9 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
       svgPaths.forEach((pathData, pathIndex) => {
         lines.push('; Path ' + (pathIndex + 1))
         
-        const pathPoints = parseSvgPathToGCode(pathData.d, parameters)
+        const rawPoints = parseSvgPathToGCode(pathData.d, parameters, pathData.transform)
+        const pathPoints = simplifyPoints(rawPoints)
+        lines.push('; Raw points: ' + rawPoints.length + ', Simplified: ' + pathPoints.length)
         
         if (pathPoints.length > 0) {
           // Move to start without extrusion
@@ -73,6 +78,72 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
         lines.push('')
       })
 
+      // Generate infill if enabled
+      if (parameters.infill.enabled) {
+        console.log('Infill is ENABLED, generating infill...')
+        console.log('Infill parameters:', parameters.infill)
+        lines.push('; Infill generation')
+        lines.push('; Min Size: ' + parameters.infill.minSize + 'mm')
+        lines.push('; Line Spacing: ' + parameters.infill.lineSpacing + 'mm')
+        lines.push('; Angle: ' + parameters.infill.angle + '°')
+        lines.push('')
+        
+        try {
+          // Create SVG content from paths for shape extraction
+          const svgContent = createSVGFromPaths(svgPaths)
+          console.log('Created SVG content for infill analysis')
+          
+          // Extract closed shapes
+          const allShapes = extractClosedShapes(svgContent)
+          console.log('Extracted closed shapes:', allShapes.length)
+          console.log('Closed shapes details:', allShapes)
+          lines.push('; Found ' + allShapes.length + ' closed shapes')
+          
+          // Filter by minimum size
+          const filteredShapes = filterShapesBySize(allShapes, parameters.infill.minSize)
+          lines.push('; ' + filteredShapes.length + ' shapes meet minimum size requirement')
+          lines.push('')
+          
+          // Generate infill for each shape
+          const infillMap = generateInfillForShapes(filteredShapes, parameters.infill)
+          
+          let totalInfillLines = 0
+          infillMap.forEach((infillLines, shapeId) => {
+            if (infillLines.length > 0) {
+              lines.push('; Infill for ' + shapeId + ' (' + infillLines.length + ' segments)')
+              totalInfillLines += infillLines.length
+              
+              infillLines.forEach((line, lineIndex) => {
+                // Convert infill line to mug coordinates
+                const start = convertInfillPointToMugCoords(line.start, parameters)
+                const end = convertInfillPointToMugCoords(line.end, parameters)
+                
+                // Move to start
+                if (lineIndex === 0 || !isPointClose(infillLines[lineIndex - 1].end, line.start)) {
+                  lines.push('G0 X' + start.x.toFixed(3) + ' Y' + start.y.toFixed(3) + ' F3000')
+                }
+                
+                // Draw line
+                const dx = end.x - start.x
+                const dy = end.y - start.y
+                const distance = Math.sqrt(dx * dx + dy * dy)
+                const extrusion = distance * parameters.extrusionRate * 0.1
+                
+                lines.push('G1 X' + end.x.toFixed(3) + ' Y' + end.y.toFixed(3) + ' E' + extrusion.toFixed(5) + ' F1500')
+              })
+              
+              lines.push('')
+            }
+          })
+          
+          lines.push('; Total infill segments: ' + totalInfillLines)
+          lines.push('')
+        } catch (error) {
+          lines.push('; Error generating infill: ' + (error as Error).message)
+          console.error('Infill generation error:', error)
+        }
+      }
+
       // GCODE footer
       lines.push('; End of print')
       lines.push('G0 Z5 F1000 ; Lift nozzle')
@@ -90,7 +161,40 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
     }
   }
 
-  const parseSvgPathToGCode = (pathD: string, params: MugParameters): Array<{x: number, y: number}> => {
+  // Parse transform helpers to match visualization behavior
+  const parseTransform = (transformStr: string | null): { a: number, b: number, c: number, d: number, e: number, f: number } | null => {
+    if (!transformStr) return null
+    const matrixMatch = transformStr.match(/matrix\(([-\d.,\s]+)\)/)
+    if (matrixMatch) {
+      const values = matrixMatch[1].split(/[\s,]+/).map(parseFloat)
+      if (values.length === 6) {
+        return { a: values[0], b: values[1], c: values[2], d: values[3], e: values[4], f: values[5] }
+      }
+    }
+    const translateMatch = transformStr.match(/translate\(([-\d.,\s]+)\)/)
+    if (translateMatch) {
+      const values = translateMatch[1].split(/[\s,]+/).map(parseFloat)
+      const tx = values[0] || 0
+      const ty = values[1] || 0
+      return { a: 1, b: 0, c: 0, d: 1, e: tx, f: ty }
+    }
+    const scaleMatch = transformStr.match(/scale\(([-\d.,\s]+)\)/)
+    if (scaleMatch) {
+      const values = scaleMatch[1].split(/[\s,]+/).map(parseFloat)
+      const sx = values[0] || 1
+      const sy = values[1] || sx
+      return { a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 }
+    }
+    return null
+  }
+
+  const applyTransform = (x: number, y: number, matrix: { a: number, b: number, c: number, d: number, e: number, f: number }): [number, number] => {
+    const newX = matrix.a * x + matrix.c * y + matrix.e
+    const newY = matrix.b * x + matrix.d * y + matrix.f
+    return [newX, newY]
+  }
+
+  const parseSvgPathToGCode = (pathD: string, params: MugParameters, transformStr?: string | null): Array<{x: number, y: number}> => {
     const points: Array<{x: number, y: number}> = []
     const commands = pathD.match(/[MmLlHhVvCcSsQqTtAaZz][^MmLlHhVvCcSsQqTtAaZz]*/g) || []
     
@@ -99,58 +203,69 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
     let startX = 0
     let startY = 0
 
-    // Find SVG bounds
-    let minX = Infinity, maxX = -Infinity
-    let minY = Infinity, maxY = -Infinity
-    
-    commands.forEach(cmd => {
-      const coords = cmd.slice(1).trim().split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n))
-      
-      for (let i = 0; i < coords.length; i += 2) {
-        if (coords[i] !== undefined) {
-          minX = Math.min(minX, coords[i])
-          maxX = Math.max(maxX, coords[i])
-        }
-        if (coords[i + 1] !== undefined) {
-          minY = Math.min(minY, coords[i + 1])
-          maxY = Math.max(maxY, coords[i + 1])
-        }
-      }
-    })
+    // Use viewBox dimensions to align with visualization
+    const svgWidth = viewBox?.width || 280
+    const svgHeight = viewBox?.height || 80
+    const minX = 0
+    const minY = 0
 
-    const svgWidth = maxX - minX || 1
-    const svgHeight = maxY - minY || 1
+    const transform = parseTransform(transformStr || null)
 
     // Convert path commands to points
     commands.forEach(cmd => {
       const type = cmd[0]
+      const isRelative = type === type.toLowerCase()
       const coords = cmd.slice(1).trim().split(/[\s,]+/).map(parseFloat).filter(n => !isNaN(n))
 
       switch (type.toUpperCase()) {
         case 'M':
           if (coords.length >= 2) {
-            currentX = type === 'M' ? coords[0] : currentX + coords[0]
-            currentY = type === 'M' ? coords[1] : currentY + coords[1]
+            currentX = isRelative ? currentX + coords[0] : coords[0]
+            currentY = isRelative ? currentY + coords[1] : coords[1]
             startX = currentX
             startY = currentY
-            points.push(convertToMugCoords(currentX, currentY, minX, minY, svgWidth, svgHeight, params))
+            const [tx, ty] = transform ? applyTransform(currentX, currentY, transform) : [currentX, currentY]
+            points.push(convertToMugCoords(tx, ty, minX, minY, svgWidth, svgHeight, params))
           }
           break
 
-        case 'L':
-          for (let i = 0; i < coords.length; i += 2) {
-            if (coords[i] !== undefined && coords[i + 1] !== undefined) {
-              const newX = type === 'L' ? coords[i] : currentX + coords[i]
-              const newY = type === 'L' ? coords[i + 1] : currentY + coords[i + 1]
+        case 'C': // Cubic Bezier curve
+          for (let i = 0; i < coords.length; i += 6) {
+            if (coords[i] !== undefined && coords[i + 1] !== undefined && 
+                coords[i + 2] !== undefined && coords[i + 3] !== undefined &&
+                coords[i + 4] !== undefined && coords[i + 5] !== undefined) {
+              const cp1X = isRelative ? currentX + coords[i] : coords[i]
+              const cp1Y = isRelative ? currentY + coords[i + 1] : coords[i + 1]
+              const cp2X = isRelative ? currentX + coords[i + 2] : coords[i + 2]
+              const cp2Y = isRelative ? currentY + coords[i + 3] : coords[i + 3]
+              const newX = isRelative ? currentX + coords[i + 4] : coords[i + 4]
+              const newY = isRelative ? currentY + coords[i + 5] : coords[i + 5]
               
-              // Add intermediate points for smooth curves
-              const steps = 5
+              const steps = 10
               for (let step = 1; step <= steps; step++) {
                 const t = step / steps
-                const x = currentX + (newX - currentX) * t
-                const y = currentY + (newY - currentY) * t
-                points.push(convertToMugCoords(x, y, minX, minY, svgWidth, svgHeight, params))
+                const mt = 1 - t
+                const x = mt * mt * mt * currentX + 3 * mt * mt * t * cp1X + 3 * mt * t * t * cp2X + t * t * t * newX
+                const y = mt * mt * mt * currentY + 3 * mt * mt * t * cp1Y + 3 * mt * t * t * cp2Y + t * t * t * newY
+                const [tx, ty] = transform ? applyTransform(x, y, transform) : [x, y]
+                points.push(convertToMugCoords(tx, ty, minX, minY, svgWidth, svgHeight, params))
               }
+              
+              currentX = newX
+              currentY = newY
+            }
+          }
+          break
+
+         case 'L':
+          for (let i = 0; i < coords.length; i += 2) {
+            if (coords[i] !== undefined && coords[i + 1] !== undefined) {
+              const newX = isRelative ? currentX + coords[i] : coords[i]
+              const newY = isRelative ? currentY + coords[i + 1] : coords[i + 1]
+              
+               // Straight line: add only the endpoint to avoid micro-steps
+               const [tx, ty] = transform ? applyTransform(newX, newY, transform) : [newX, newY]
+               points.push(convertToMugCoords(tx, ty, minX, minY, svgWidth, svgHeight, params))
               
               currentX = newX
               currentY = newY
@@ -161,13 +276,9 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
         case 'H':
           for (let i = 0; i < coords.length; i++) {
             if (coords[i] !== undefined) {
-              const newX = type === 'H' ? coords[i] : currentX + coords[i]
-              const steps = 5
-              for (let step = 1; step <= steps; step++) {
-                const t = step / steps
-                const x = currentX + (newX - currentX) * t
-                points.push(convertToMugCoords(x, currentY, minX, minY, svgWidth, svgHeight, params))
-              }
+              const newX = isRelative ? currentX + coords[i] : coords[i]
+               const [tx, ty] = transform ? applyTransform(newX, currentY, transform) : [newX, currentY]
+               points.push(convertToMugCoords(tx, ty, minX, minY, svgWidth, svgHeight, params))
               currentX = newX
             }
           }
@@ -176,13 +287,9 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
         case 'V':
           for (let i = 0; i < coords.length; i++) {
             if (coords[i] !== undefined) {
-              const newY = type === 'V' ? coords[i] : currentY + coords[i]
-              const steps = 5
-              for (let step = 1; step <= steps; step++) {
-                const t = step / steps
-                const y = currentY + (newY - currentY) * t
-                points.push(convertToMugCoords(currentX, y, minX, minY, svgWidth, svgHeight, params))
-              }
+              const newY = isRelative ? currentY + coords[i] : coords[i]
+               const [tx, ty] = transform ? applyTransform(currentX, newY, transform) : [currentX, newY]
+               points.push(convertToMugCoords(tx, ty, minX, minY, svgWidth, svgHeight, params))
               currentY = newY
             }
           }
@@ -192,10 +299,10 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
           for (let i = 0; i < coords.length; i += 4) {
             if (coords[i] !== undefined && coords[i + 1] !== undefined && 
                 coords[i + 2] !== undefined && coords[i + 3] !== undefined) {
-              const cpX = type === 'Q' ? coords[i] : currentX + coords[i]
-              const cpY = type === 'Q' ? coords[i + 1] : currentY + coords[i + 1]
-              const newX = type === 'Q' ? coords[i + 2] : currentX + coords[i + 2]
-              const newY = type === 'Q' ? coords[i + 3] : currentY + coords[i + 3]
+              const cpX = isRelative ? currentX + coords[i] : coords[i]
+              const cpY = isRelative ? currentY + coords[i + 1] : coords[i + 1]
+              const newX = isRelative ? currentX + coords[i + 2] : coords[i + 2]
+              const newY = isRelative ? currentY + coords[i + 3] : coords[i + 3]
               
               // Approximate quadratic bezier with line segments
               const steps = 5
@@ -203,7 +310,8 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
                 const t = step / steps
                 const x = (1 - t) * (1 - t) * currentX + 2 * (1 - t) * t * cpX + t * t * newX
                 const y = (1 - t) * (1 - t) * currentY + 2 * (1 - t) * t * cpY + t * t * newY
-                points.push(convertToMugCoords(x, y, minX, minY, svgWidth, svgHeight, params))
+                const [tx, ty] = transform ? applyTransform(x, y, transform) : [x, y]
+                points.push(convertToMugCoords(tx, ty, minX, minY, svgWidth, svgHeight, params))
               }
               
               currentX = newX
@@ -212,15 +320,10 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
           }
           break
 
-        case 'Z':
+         case 'Z':
           if (startX !== currentX || startY !== currentY) {
-            const steps = 5
-            for (let step = 1; step <= steps; step++) {
-              const t = step / steps
-              const x = currentX + (startX - currentX) * t
-              const y = currentY + (startY - currentY) * t
-              points.push(convertToMugCoords(x, y, minX, minY, svgWidth, svgHeight, params))
-            }
+            const [tx, ty] = transform ? applyTransform(startX, startY, transform) : [startX, startY]
+            points.push(convertToMugCoords(tx, ty, minX, minY, svgWidth, svgHeight, params))
           }
           currentX = startX
           currentY = startY
@@ -229,6 +332,39 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
     })
 
     return points
+  }
+
+  // Simplify: remove tiny moves and merge collinear points
+  const simplifyPoints = (pts: Array<{x: number, y: number}>): Array<{x: number, y: number}> => {
+    if (pts.length <= 2) return pts
+    const epsilon = 0.01 // mm
+    const out: Array<{x: number, y: number}> = [pts[0]]
+    for (let i = 1; i < pts.length; i++) {
+      const prev = out[out.length - 1]
+      const cur = pts[i]
+      const dx = cur.x - prev.x
+      const dy = cur.y - prev.y
+      const dist = Math.sqrt(dx*dx + dy*dy)
+      if (dist < epsilon) continue
+      // Attempt collinearity merge with previous segment
+      if (out.length >= 2) {
+        const a = out[out.length - 2]
+        const b = prev
+        const c = cur
+        const abx = b.x - a.x, aby = b.y - a.y
+        const bcx = c.x - b.x, bcy = c.y - b.y
+        const cross = Math.abs(abx * bcy - aby * bcx)
+        const abLen = Math.sqrt(abx*abx + aby*aby)
+        const bcLen = Math.sqrt(bcx*bcx + bcy*bcy)
+        if (abLen > 0 && bcLen > 0 && cross / (abLen * bcLen) < 1e-6) {
+          // Collinear: replace prev with cur
+          out[out.length - 1] = cur
+          continue
+        }
+      }
+      out.push(cur)
+    }
+    return out
   }
 
   const convertToMugCoords = (
@@ -254,6 +390,41 @@ function GCodeGenerator({ svgPaths, parameters }: GCodeGeneratorProps) {
     const y = yInMm
 
     return { x, y }
+  }
+
+  const convertInfillPointToMugCoords = (
+    point: { x: number, y: number },
+    params: MugParameters
+  ): { x: number, y: number } => {
+    // Match visualization's coordinate mapping (flip X and Y relative to viewBox)
+    const svgWidth = viewBox?.width || 280
+    const svgHeight = viewBox?.height || 80
+    const minX = 0
+    const minY = 0
+    const xInMm = (svgWidth - (point.x - minX)) + params.xOffset
+    const yInMm = (svgHeight - (point.y - minY)) + params.yOffset
+    return { x: xInMm, y: yInMm }
+  }
+
+  const createSVGFromPaths = (paths: any[]): string => {
+    const pathElements = paths.map((p, i) => 
+      `<path id="path-${i}" d="${p.d}" />`
+    ).join('\n')
+    
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg">
+${pathElements}
+</svg>`
+  }
+
+  const isPointClose = (
+    p1: { x: number, y: number },
+    p2: { x: number, y: number },
+    tolerance: number = 0.01
+  ): boolean => {
+    const dx = p2.x - p1.x
+    const dy = p2.y - p1.y
+    return Math.sqrt(dx * dx + dy * dy) < tolerance
   }
 
   const downloadGCode = () => {
