@@ -3,6 +3,37 @@
 import { type ClosedShape, type Point } from '../types/infill'
 import { parsePathToBounds, isPathClosed } from './geometryUtils'
 
+// Simple SVG transform parsing and application to match generator/visualization
+function parseTransform(transformStr: string | null): { a: number, b: number, c: number, d: number, e: number, f: number } | null {
+  if (!transformStr) return null
+  const matrixMatch = transformStr.match(/matrix\(([-\d.,\s]+)\)/)
+  if (matrixMatch) {
+    const values = matrixMatch[1].split(/[\s,]+/).map(parseFloat)
+    if (values.length === 6) {
+      return { a: values[0], b: values[1], c: values[2], d: values[3], e: values[4], f: values[5] }
+    }
+  }
+  const translateMatch = transformStr.match(/translate\(([-\d.,\s]+)\)/)
+  if (translateMatch) {
+    const values = translateMatch[1].split(/[\s,]+/).map(parseFloat)
+    const tx = values[0] || 0
+    const ty = values[1] || 0
+    return { a: 1, b: 0, c: 0, d: 1, e: tx, f: ty }
+  }
+  const scaleMatch = transformStr.match(/scale\(([-\d.,\s]+)\)/)
+  if (scaleMatch) {
+    const values = scaleMatch[1].split(/[\s,]+/).map(parseFloat)
+    const sx = values[0] || 1
+    const sy = values[1] || sx
+    return { a: sx, b: 0, c: 0, d: sy, e: 0, f: 0 }
+  }
+  return null
+}
+
+function applyTransform(x: number, y: number, m: { a: number, b: number, c: number, d: number, e: number, f: number }): { x: number, y: number } {
+  return { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f }
+}
+
 /**
  * Convert SVG path to polygon (array of points)
  * Simplifies Bezier curves to line segments
@@ -177,17 +208,36 @@ export function extractClosedShapes(svgContent: string): ClosedShape[] {
   
   paths.forEach((pathElement, index) => {
     const d = pathElement.getAttribute('d')
+    const transformStr = pathElement.getAttribute('transform')
+    const transform = parseTransform(transformStr)
     if (!d) return
     
     // Check if path is closed
     if (isPathClosed(d)) {
       const bounds = parsePathToBounds(d)
-      const polygon = convertPathToPolygon(d)
+      let polygon = convertPathToPolygon(d)
+      if (transform) {
+        polygon = polygon.map(p => applyTransform(p.x, p.y, transform))
+      }
+      // Recompute bounds if transformed
+      const xs = polygon.map(p => p.x)
+      const ys = polygon.map(p => p.y)
+      const minX = Math.min(...xs)
+      const maxX = Math.max(...xs)
+      const minY = Math.min(...ys)
+      const maxY = Math.max(...ys)
       
       shapes.push({
         id: `shape-${index}`,
         pathD: d,
-        bounds,
+        bounds: {
+          minX,
+          minY,
+          maxX,
+          maxY,
+          width: maxX - minX,
+          height: maxY - minY
+        },
         polygon
       })
     }

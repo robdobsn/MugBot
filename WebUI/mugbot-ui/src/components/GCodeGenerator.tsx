@@ -407,9 +407,10 @@ function GCodeGenerator({ svgPaths, parameters, viewBox }: GCodeGeneratorProps) 
   }
 
   const createSVGFromPaths = (paths: any[]): string => {
-    const pathElements = paths.map((p, i) => 
-      `<path id="path-${i}" d="${p.d}" />`
-    ).join('\n')
+    const pathElements = paths.map((p, i) => {
+      const transformAttr = p.transform ? ` transform="${p.transform}"` : ''
+      return `<path id="path-${i}" d="${p.d}"${transformAttr} />`
+    }).join('\n')
     
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg">
