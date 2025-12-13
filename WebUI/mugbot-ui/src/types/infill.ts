@@ -8,10 +8,11 @@ export interface InfillParameters {
 }
 
 export interface ClosedShape {
+  id: string             // Shape identifier
   pathD: string          // SVG path data
   bounds: BoundingBox    // Calculated bounds
-  isClosed: boolean      // Verified closed status
-  minDimension: number   // Smallest of width/height
+  polygon: Point[]       // Polygon approximation of path
+  fill?: boolean         // Whether SVG indicates filled (true) or none/transparent (false)
 }
 
 export interface BoundingBox {

@@ -210,6 +210,33 @@ export function extractClosedShapes(svgContent: string): ClosedShape[] {
     const d = pathElement.getAttribute('d')
     const transformStr = pathElement.getAttribute('transform')
     const transform = parseTransform(transformStr)
+    // Read fill and fill-opacity from attribute or style
+    let fillAttr = pathElement.getAttribute('fill')
+    let fillOpacityAttr = pathElement.getAttribute('fill-opacity')
+    const styleAttr = pathElement.getAttribute('style')
+    if (styleAttr) {
+      // Prefer style fill/opacity when attribute is missing or explicitly 'none'
+      const attrIsNone = (fillAttr || '').trim().toLowerCase() === 'none'
+      if (!fillAttr || attrIsNone) {
+        const m = styleAttr.match(/fill\s*:\s*([^;]+)/)
+        if (m) fillAttr = m[1]
+      }
+      if (!fillOpacityAttr) {
+        const mo = styleAttr.match(/fill-opacity\s*:\s*([^;]+)/)
+        if (mo) fillOpacityAttr = mo[1]
+      }
+    }
+    const fillOpacity = fillOpacityAttr ? parseFloat(fillOpacityAttr) : undefined
+    const isTransparent = typeof fillOpacity === 'number' && fillOpacity <= 0.01
+    const normalizedFill = (fillAttr || '').trim().toLowerCase()
+    const isNone = normalizedFill === 'none'
+    const isWhite = normalizedFill === '#fff' || normalizedFill === '#ffffff' || normalizedFill === 'white' || normalizedFill.startsWith('rgb(') && (() => {
+      const m = normalizedFill.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/)
+      if (!m) return false
+      const r = parseInt(m[1], 10), g = parseInt(m[2], 10), b = parseInt(m[3], 10)
+      const tol = 250
+      return r >= tol && g >= tol && b >= tol
+    })()
     if (!d) return
     
     // Check if path is closed
@@ -227,7 +254,7 @@ export function extractClosedShapes(svgContent: string): ClosedShape[] {
       const minY = Math.min(...ys)
       const maxY = Math.max(...ys)
       
-      shapes.push({
+      const shape: ClosedShape = {
         id: `shape-${index}`,
         pathD: d,
         bounds: {
@@ -238,8 +265,21 @@ export function extractClosedShapes(svgContent: string): ClosedShape[] {
           width: maxX - minX,
           height: maxY - minY
         },
-        polygon
+        polygon,
+        // fill flag: true for non-white visible fill, false for white visible fill (hole), undefined for none/transparent
+        fill: isNone || isTransparent ? undefined : (!isWhite)
+      }
+      console.log('[Shapes] Extracted path', {
+        id: shape.id,
+        fillAttr,
+        fillOpacity,
+        normalizedFill,
+        isWhite,
+        isNone,
+        isTransparent,
+        classifiedFill: shape.fill
       })
+      shapes.push(shape)
     }
   })
   

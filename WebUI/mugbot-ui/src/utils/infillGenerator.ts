@@ -1,7 +1,8 @@
 // Infill pattern generator for closed shapes
 
 import { type InfillParameters, type ClosedShape, type InfillLine, type Point } from '../types/infill'
-import { clipLineToPolygon } from './geometryUtils'
+import { clipLineToPolygon, pointInPolygon } from './geometryUtils'
+import { lineSegmentIntersection } from './geometryUtils'
 
 /**
  * Generate horizontal raster infill for a closed shape
@@ -126,6 +127,37 @@ export function generateConcentricInfill(
 }
 
 /**
+ * Compute an area-weighted centroid for a polygon.
+ * Assumes polygon points are ordered and the polygon is non-self-intersecting.
+ */
+function polygonCentroid(polygon: Point[]): Point {
+  const n = polygon.length
+  if (n === 0) return { x: 0, y: 0 }
+  if (n === 1) return { x: polygon[0].x, y: polygon[0].y }
+  // Ensure closed by referencing first point at end
+  let areaTwice = 0
+  let cx = 0
+  let cy = 0
+  for (let i = 0; i < n; i++) {
+    const p0 = polygon[i]
+    const p1 = polygon[(i + 1) % n]
+    const cross = p0.x * p1.y - p1.x * p0.y
+    areaTwice += cross
+    cx += (p0.x + p1.x) * cross
+    cy += (p0.y + p1.y) * cross
+  }
+  if (Math.abs(areaTwice) < 1e-8) {
+    // Fallback to average of points if area is near zero
+    let ax = 0
+    let ay = 0
+    for (const p of polygon) { ax += p.x; ay += p.y }
+    return { x: ax / n, y: ay / n }
+  }
+  const factor = 1 / (3 * areaTwice)
+  return { x: cx * factor, y: cy * factor }
+}
+
+/**
  * Main infill generation function
  * Routes to specific pattern generators based on parameters
  */
@@ -146,14 +178,107 @@ export function generateInfillForShapes(
   params: InfillParameters
 ): Map<string, InfillLine[]> {
   const infillMap = new Map<string, InfillLine[]>()
-  
-  for (const shape of shapes) {
-    const lines = generateInfill(shape, params)
-    if (lines.length > 0) {
-      infillMap.set(shape.id, lines)
+
+  // Determine holes: unfilled (white) shapes fully enclosed in a filled shape
+  const centroids = new Map<string, Point>()
+  shapes.forEach(s => centroids.set(s.id, polygonCentroid(s.polygon)))
+
+  for (const outer of shapes) {
+    const isFilled = outer.fill === undefined ? true : !!outer.fill
+    if (!isFilled) continue
+
+    // Find hole polygons: shapes with fill=false whose centroid lies inside this outer
+    const holeCandidates = shapes
+      .filter(s => s.id !== outer.id)
+      .filter(s => s.fill === false)
+    // Consider as hole if centroid inside OR majority of vertices inside
+    const holePolygons = holeCandidates
+      .filter(s => {
+        const c = centroids.get(s.id)!
+        const centroidInside = pointInPolygon(c, outer.polygon)
+        if (centroidInside) return true
+        let insideVertices = 0
+        const vertsToCheck = s.polygon.length
+        for (const v of s.polygon) {
+          if (pointInPolygon(v, outer.polygon)) insideVertices++
+        }
+        return insideVertices > vertsToCheck / 2
+      })
+      .map(s => s.polygon)
+    if (holeCandidates.length || holePolygons.length) {
+      console.log('[Infill] Hole detection', {
+        outerId: outer.id,
+        holeCandidates: holeCandidates.map(h => ({ id: h.id, centroid: centroids.get(h.id) })),
+        detectedHoles: holePolygons.length
+      })
+    }
+
+    // Generate candidate infill lines clipped to outer polygon
+    const lines = generateInfill(outer, params)
+    if (lines.length === 0) continue
+
+    // Subtract hole polygons by splitting segments at hole boundaries
+    const subtractHolesFromSegments = (segs: InfillLine[], holes: Point[][]): InfillLine[] => {
+      let current = segs
+      for (const hole of holes) {
+        const next: InfillLine[] = []
+        for (const s of current) {
+          // Collect intersections of segment with hole edges
+          const intersections: Array<{ point: Point; t: number }> = []
+          for (let i = 0; i < hole.length; i++) {
+            const j = (i + 1) % hole.length
+            const edge: InfillLine = { start: hole[i], end: hole[j] }
+            const inter = lineSegmentIntersection(s, edge)
+            if (inter) {
+              const dx = s.end.x - s.start.x
+              const dy = s.end.y - s.start.y
+              const t = Math.abs(dx) > Math.abs(dy)
+                ? (inter.x - s.start.x) / dx
+                : (inter.y - s.start.y) / dy
+              if (t >= 0 && t <= 1) intersections.push({ point: inter, t })
+            }
+          }
+          intersections.sort((a, b) => a.t - b.t)
+          // Build segments alternating through intersections, keeping outside parts
+          const points: Point[] = [s.start, ...intersections.map(i => i.point), s.end]
+          for (let k = 0; k < points.length - 1; k++) {
+            const sub: InfillLine = { start: points[k], end: points[k + 1] }
+            const mid = { x: (sub.start.x + sub.end.x) / 2, y: (sub.start.y + sub.end.y) / 2 }
+            if (!pointInPolygon(mid, hole)) {
+              next.push(sub)
+            }
+          }
+        }
+        current = next
+      }
+      return current
+    }
+
+    // Fallback: if no explicit holes detected via fill, infer holes by nesting
+    let inferredHoles: Point[][] = []
+    if (holePolygons.length === 0) {
+      const nested = shapes
+        .filter(s => s.id !== outer.id)
+        .filter(s => pointInPolygon(centroids.get(s.id)!, outer.polygon))
+        .map(s => s.polygon)
+      inferredHoles = nested
+      if (nested.length) {
+        console.log('[Infill] Fallback nesting holes', { outerId: outer.id, count: nested.length })
+      }
+    }
+    const holesToUse = holePolygons.length > 0 ? holePolygons : inferredHoles
+    const filtered = subtractHolesFromSegments(lines, holesToUse)
+    console.log('[Infill] Segment subtraction', {
+      outerId: outer.id,
+      before: lines.length,
+      after: filtered.length
+    })
+
+    if (filtered.length > 0) {
+      infillMap.set(outer.id, filtered)
     }
   }
-  
+
   return infillMap
 }
 

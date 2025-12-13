@@ -137,7 +137,10 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
   const createSVGFromPaths = (paths: any[]): string => {
     const pathElements = paths.map((p, i) => {
       const transformAttr = p.transform ? ` transform="${p.transform}"` : ''
-      return `<path id="path-${i}" d="${p.d}"${transformAttr} />`
+      const styleAttr = p.style ? ` style="${p.style}"` : ''
+      const fillAttr = p.fill ? ` fill="${p.fill}"` : ''
+      const fillOpacityAttr = p.fillOpacity !== undefined ? ` fill-opacity="${p.fillOpacity}"` : ''
+      return `<path id="path-${i}" d="${p.d}"${transformAttr}${styleAttr}${fillAttr}${fillOpacityAttr} />`
     }).join('\n')
     
     return `<?xml version="1.0" encoding="UTF-8"?>
