@@ -109,7 +109,7 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
           const points = [start, end]
           const geometry = new THREE.BufferGeometry().setFromPoints(points)
           const material = new THREE.LineBasicMaterial({ 
-            color: 0x00ff00,  // Green for infill
+            color: 0x0066ff,  // Blue for infill
             linewidth: 1,
             opacity: 0.7,
             transparent: true
@@ -130,9 +130,10 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
 
   // Helper to create SVG content from paths
   const createSVGFromPaths = (paths: any[]): string => {
-    const pathElements = paths.map((p, i) => 
-      `<path id="path-${i}" d="${p.d}" />`
-    ).join('\n')
+    const pathElements = paths.map((p, i) => {
+      const transformAttr = p.transform ? ` transform="${p.transform}"` : ''
+      return `<path id="path-${i}" d="${p.d}"${transformAttr} />`
+    }).join('\n')
     
     return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg">
