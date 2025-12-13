@@ -103,8 +103,9 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
       infillMap.forEach((infillLines, shapeId) => {
         infillLines.forEach(line => {
           // Convert infill line to 3D points on mug surface
-          const start = convertInfillPointToMugSurface(line.start, parameters, mugRadius)
-          const end = convertInfillPointToMugSurface(line.end, parameters, mugRadius)
+          const surfaceOffset = 0.3 // mm: lift infill slightly off surface to avoid z-fighting
+          const start = convertInfillPointToMugSurface(line.start, parameters, mugRadius + surfaceOffset)
+          const end = convertInfillPointToMugSurface(line.end, parameters, mugRadius + surfaceOffset)
           
           const points = [start, end]
           const geometry = new THREE.BufferGeometry().setFromPoints(points)
@@ -112,9 +113,13 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
             color: 0x0066ff,  // Blue for infill
             linewidth: 1,
             opacity: 0.7,
-            transparent: true
+            transparent: true,
+            depthTest: false,
+            depthWrite: false
           })
           const lineObj = new THREE.Line(geometry, material)
+          // Ensure infill renders on top of mug surface
+          lineObj.renderOrder = 2
           group.add(lineObj)
           totalLines++
         })
