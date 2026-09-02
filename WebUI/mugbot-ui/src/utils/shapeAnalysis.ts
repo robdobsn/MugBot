@@ -1,7 +1,7 @@
 // Shape analysis utilities for detecting and processing closed shapes
 
 import { type ClosedShape, type Point } from '../types/infill'
-import { parsePathToBounds, isPathClosed } from './geometryUtils'
+import { isPathClosed } from './geometryUtils'
 
 // Simple SVG transform parsing and application to match generator/visualization
 function parseTransform(transformStr: string | null): { a: number, b: number, c: number, d: number, e: number, f: number } | null {
@@ -241,7 +241,6 @@ export function extractClosedShapes(svgContent: string): ClosedShape[] {
     
     // Check if path is closed
     if (isPathClosed(d)) {
-      const bounds = parsePathToBounds(d)
       let polygon = convertPathToPolygon(d)
       if (transform) {
         polygon = polygon.map(p => applyTransform(p.x, p.y, transform))

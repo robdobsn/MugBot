@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei'
 import * as THREE from 'three'
@@ -100,7 +100,7 @@ function MugMesh({ svgPaths, parameters, viewBox }: MugMeshProps) {
       const infillMap = generateInfillForShapes(filteredShapes, parameters.infill)
       
       let totalLines = 0
-      infillMap.forEach((infillLines, shapeId) => {
+      infillMap.forEach((infillLines) => {
         infillLines.forEach(line => {
           // Convert infill line to 3D points on mug surface
           const surfaceOffset = 0.3 // mm: lift infill slightly off surface to avoid z-fighting

@@ -17,7 +17,6 @@ export interface MugParameters {
 }
 
 function App() {
-  const [svgData, setSvgData] = useState<string | null>(null)
   const [svgPaths, setSvgPaths] = useState<any[]>([])
   const [viewBox, setViewBox] = useState<{ width: number, height: number } | undefined>()
   const [parameters, setParameters] = useState<MugParameters>({
@@ -35,10 +34,9 @@ function App() {
     }
   })
 
-  const handleSvgLoad = (data: string, paths: any[], viewBoxData?: { width: number, height: number }) => {
+  const handleSvgLoad = (_data: string, paths: any[], viewBoxData?: { width: number, height: number }) => {
     console.log('App: SVG loaded with', paths.length, 'paths')
     console.log('App: ViewBox:', viewBoxData)
-    setSvgData(data)
     setSvgPaths(paths)
     setViewBox(viewBoxData)
   }
